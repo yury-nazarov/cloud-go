@@ -10,8 +10,6 @@ import (
 
 func main() {
 	r := mux.NewRouter()
-	//r.Use(loggingMiddleware)
-	//r.HandleFunc("/", nil)
 	// curl -X PUT -d 'Hello, key-value store!' -v http://localhost:8080/v1/key-a
 	r.HandleFunc("/v1/{key}", keyValuePutHandler).Methods("PUT")
 	log.Fatal(http.ListenAndServe(":8080", r))
