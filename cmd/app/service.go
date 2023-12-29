@@ -15,6 +15,8 @@ func main() {
 	r.HandleFunc("/v1/{key}", keyValuePutHandler).Methods("PUT")
 	// curl -v http://localhost:8080/v1/key-a
 	r.HandleFunc("/v1/{key}", keyValueGetHandler).Methods("GET")
+	// curl -X DELETE -v http://localhost:8080/v1/key-a
+	r.HandleFunc("/v1/{key}", keyValueDeleteHandler).Methods("DELETE")
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
@@ -42,9 +44,11 @@ func keyValuePutHandler(w http.ResponseWriter, r *http.Request) {
 			err.Error(),
 			http.StatusInternalServerError,
 		)
+		return
 	}
 	// Если все ок, отправляем ответ
 	w.WriteHeader(http.StatusCreated)
+	return
 }
 
 func keyValueGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -63,5 +67,20 @@ func keyValueGetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Сообщаем значение
+	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(value))
+	return
+}
+
+func keyValueDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	key := vars["key"]
+
+	err := Delete(key)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	return
 }
