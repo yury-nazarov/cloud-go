@@ -39,7 +39,7 @@ func TestPut(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	const key = "read-kay"
+	const key = "read-key"
 	const value = "read-value"
 
 	var val interface{}
@@ -65,5 +65,27 @@ func TestGet(t *testing.T) {
 
 	if val != value {
 		t.Error("val/value mistmatch")
+	}
+}
+
+func TestDelete(t *testing.T) {
+	const key = "read-key"
+	const value = "read-value"
+
+	var err error
+
+	defer delete(store.m, key)
+
+	// Storage is empty
+	err = Delete(key)
+	if err != nil {
+		t.Error("unexpected error", err)
+	}
+
+	// Storage with data
+	store.m[key] = value
+	err = Delete(key)
+	if err != nil {
+		t.Error("unexpected error", err)
 	}
 }

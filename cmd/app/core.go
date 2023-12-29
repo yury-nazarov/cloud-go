@@ -35,6 +35,8 @@ func Get(key string) (string, error) {
 
 // Delete удалить элемент по ключу
 func Delete(key string) error {
+	store.Lock()
 	delete(store.m, key)
+	store.Unlock()
 	return nil
 }
