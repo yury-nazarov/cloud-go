@@ -2,12 +2,42 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
 )
+
+var logger TransactionLogger
+
+func initializeTransactionLog() error {
+	var err error
+
+	logger, err = NewFileTransactionLogger("transaction.log")
+	if err != nil {
+		return fmt.Errorf("filed to create event logger: %w", err)
+	}
+
+	events, errors := logger.ReadEvents()
+	e, ok := Event{}, true
+
+	for ok && err == nil {
+		select {
+		case err, ok = <-errors:
+		case e, ok = <-events:
+			switch e.EventType {
+			case EventDelete:
+				err = Delete(e.Key)
+			case EventPut:
+				err = Put(e.Key, e.Value)
+			}
+		}
+	}
+	logger.Run()
+	return err
+}
 
 func main() {
 	r := mux.NewRouter()
@@ -17,7 +47,13 @@ func main() {
 	r.HandleFunc("/v1/{key}", keyValueGetHandler).Methods("GET")
 	// curl -X DELETE -v http://localhost:8080/v1/key-a
 	r.HandleFunc("/v1/{key}", keyValueDeleteHandler).Methods("DELETE")
-	log.Fatal(http.ListenAndServe(":8080", r))
+
+	if err := initializeTransactionLog(); err != nil {
+		log.Fatal("can not init Transaction file", err.Error())
+	}
+	listen := ":8080"
+	log.Println("app was started on: ", listen)
+	log.Fatal(http.ListenAndServe(listen, r))
 }
 
 func keyValuePutHandler(w http.ResponseWriter, r *http.Request) {
@@ -46,9 +82,10 @@ func keyValuePutHandler(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
+	// Логируем
+	logger.WritePut(key, string(value))
 	// Если все ок, отправляем ответ
 	w.WriteHeader(http.StatusCreated)
-	return
 }
 
 func keyValueGetHandler(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +106,6 @@ func keyValueGetHandler(w http.ResponseWriter, r *http.Request) {
 	// Сообщаем значение
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(value))
-	return
 }
 
 func keyValueDeleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +117,7 @@ func keyValueDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Логируем
+	logger.WriteDelete(key)
 	w.WriteHeader(http.StatusOK)
-	return
 }
