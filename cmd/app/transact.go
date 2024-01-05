@@ -101,6 +101,8 @@ func (l *FileTransactionLogger) ReadEvents() (<-chan Event, <-chan error) {
 	outEvent := make(chan Event)
 	outError := make(chan error, 1)
 
+	// В фоновом режиме записываем в канал
+	// В функции инициализации будет вычитывать из него асинхронно
 	go func() {
 		var e Event
 
@@ -112,10 +114,11 @@ func (l *FileTransactionLogger) ReadEvents() (<-chan Event, <-chan error) {
 			line := scanner.Text()
 
 			fmt.Sscanf(line, "%d\t%d\t%s\t%s", &e.Sequence, &e.EventType, &e.Key, &e.Value)
+
 			// Если последнего элемента нет в строке, то не пажаем с EOF, а заменяем пустой срокой
 			uv, err := url.QueryUnescape(e.Value)
 			if err != nil {
-				outError <- fmt.Errorf("input parse error: %w", err)
+				outError <- fmt.Errorf("value decoding error: %w", err)
 				return
 			}
 			e.Value = uv
@@ -127,12 +130,16 @@ func (l *FileTransactionLogger) ReadEvents() (<-chan Event, <-chan error) {
 			}
 			// Запоминаем порядковый номер
 			l.lastSequence = e.Sequence
+			// Записываем событие в канал
+			//fmt.Printf("Записали событие %+v в канал\n", e)
 			outEvent <- e
 		}
+
 		if err := scanner.Err(); err != nil {
 			outError <- fmt.Errorf("transaction log read failure: %w", err)
 			return
 		}
 	}()
+
 	return outEvent, outError
 }

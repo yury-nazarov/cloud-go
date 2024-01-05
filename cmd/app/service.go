@@ -1,9 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 
@@ -13,34 +11,6 @@ import (
 var listen = ":8080"
 var logger TransactionLogger
 
-func initializeTransactionLog() error {
-	var err error
-
-	logger, err = NewFileTransactionLogger("transaction.log")
-	if err != nil {
-		return fmt.Errorf("filed to create event logger: %w", err)
-	}
-	// Читаем журнал транзакций, загружая в RAM данные
-	events, errors := logger.ReadEvents()
-
-	e, ok := Event{}, true
-
-	for ok && err == nil {
-		select {
-		case err, ok = <-errors:
-		case e, ok = <-events:
-			switch e.EventType {
-			case EventDelete:
-				err = Delete(e.Key)
-			case EventPut:
-				err = Put(e.Key, e.Value)
-			}
-		}
-	}
-
-	logger.Run()
-	return err
-}
 
 func main() {
 	if err := initializeTransactionLog(); err != nil {
@@ -55,72 +25,47 @@ func main() {
 	// curl -X DELETE -v http://localhost:8080/v1/key-a
 	r.HandleFunc("/v1/{key}", keyValueDeleteHandler).Methods("DELETE")
 
+
+	fmt.Printf("%+v\n\n", store.m)
+
 	log.Println("app was started on: ", listen)
 	log.Fatal(http.ListenAndServe(listen, r))
 }
 
-func keyValuePutHandler(w http.ResponseWriter, r *http.Request) {
-	// Получить ключ из запроса
-	vars := mux.Vars(r)
-	key := vars["key"]
 
-	// тело запроса хранит значение
-	value, err := io.ReadAll(r.Body)
-	defer r.Body.Close()
-	// если возникла ошибка сообщаем о ней
+
+func initializeTransactionLog() error {
+	var err error
+
+	logger, err = NewFileTransactionLogger("transaction.log")
 	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusInternalServerError,
-		)
+		return fmt.Errorf("filed to create event logger: %w", err)
 	}
-	// Сохраняем значение в хранилище как строку
-	err = Put(key, string(value))
-	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusInternalServerError,
-		)
-		return
-	}
-	// Логируем
-	logger.WritePut(key, string(value))
-	// Если все ок, отправляем ответ
-	w.WriteHeader(http.StatusCreated)
-}
+	// Читаем журнал транзакций, загружая в RAM данные
+	//events, errors := logger.ReadEvents()
+	events, errors := logger.ReadEvents()
 
-func keyValueGetHandler(w http.ResponseWriter, r *http.Request) {
-	// Извлекаем ключи из запроса
-	vars := mux.Vars(r)
-	key := vars["key"]
+	e, ok := Event{}, true
 
-	// Получаем из хранилища данные для ключа
-	value, err := Get(key)
-	if errors.Is(err, ErrorNoSuchKey) {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Сообщаем значение
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(value))
-}
+	// Пока не получим ошибку - на пример при Put или Delete
+	// или не закроется канал
+	for ok && err == nil {
+		select {
+		// ok=true пока канал не закрыт
+		case err, ok = <-errors:
 
-func keyValueDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	key := vars["key"]
-
-	err := Delete(key)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		case e, ok = <-events:
+			switch e.EventType {
+			case EventDelete:
+				err = Delete(e.Key)
+				fmt.Println("Transaction upload. Delete key:", e.Key)
+			case EventPut:
+				err = Put(e.Key, e.Value)
+				fmt.Printf("Transaction upload. Put key: %s, value: %s\n", e.Key, e.Value)
+			}
+		}
 	}
-	// Логируем
-	logger.WriteDelete(key)
-	w.WriteHeader(http.StatusOK)
+
+	logger.Run()
+	return err
 }
