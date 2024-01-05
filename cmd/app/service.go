@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
+var listen = ":8080"
 var logger TransactionLogger
 
 func initializeTransactionLog() error {
@@ -19,8 +20,9 @@ func initializeTransactionLog() error {
 	if err != nil {
 		return fmt.Errorf("filed to create event logger: %w", err)
 	}
-
+	// Читаем журнал транзакций, загружая в RAM данные
 	events, errors := logger.ReadEvents()
+
 	e, ok := Event{}, true
 
 	for ok && err == nil {
@@ -35,11 +37,16 @@ func initializeTransactionLog() error {
 			}
 		}
 	}
+
 	logger.Run()
 	return err
 }
 
 func main() {
+	if err := initializeTransactionLog(); err != nil {
+		log.Fatal("can not init Transaction file: ", err.Error())
+	}
+
 	r := mux.NewRouter()
 	// curl -X PUT -d 'Hello, key-value store!' -v http://localhost:8080/v1/key-a
 	r.HandleFunc("/v1/{key}", keyValuePutHandler).Methods("PUT")
@@ -48,10 +55,6 @@ func main() {
 	// curl -X DELETE -v http://localhost:8080/v1/key-a
 	r.HandleFunc("/v1/{key}", keyValueDeleteHandler).Methods("DELETE")
 
-	if err := initializeTransactionLog(); err != nil {
-		log.Fatal("can not init Transaction file", err.Error())
-	}
-	listen := ":8080"
 	log.Println("app was started on: ", listen)
 	log.Fatal(http.ListenAndServe(listen, r))
 }

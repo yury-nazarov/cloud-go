@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 )
 
@@ -107,13 +108,18 @@ func (l *FileTransactionLogger) ReadEvents() (<-chan Event, <-chan error) {
 		defer close(outError)
 
 		for scanner.Scan() {
+			// Читаем построчно файл
 			line := scanner.Text()
 
-			_, err := fmt.Sscanf(line, "%d\t%d\t%s\t%s", &e.Sequence, &e.EventType, &e.Key, &e.Value)
+			fmt.Sscanf(line, "%d\t%d\t%s\t%s", &e.Sequence, &e.EventType, &e.Key, &e.Value)
+			// Если последнего элемента нет в строке, то не пажаем с EOF, а заменяем пустой срокой
+			uv, err := url.QueryUnescape(e.Value)
 			if err != nil {
 				outError <- fmt.Errorf("input parse error: %w", err)
-				return
+				//return
 			}
+			e.Value = uv
+
 			// Проверка целостности, порядковый номер последовательно увеличивается?
 			if l.lastSequence >= e.Sequence {
 				outError <- fmt.Errorf("transaction number out of sequence")
