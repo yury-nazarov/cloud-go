@@ -116,7 +116,7 @@ func (l *FileTransactionLogger) ReadEvents() (<-chan Event, <-chan error) {
 			uv, err := url.QueryUnescape(e.Value)
 			if err != nil {
 				outError <- fmt.Errorf("input parse error: %w", err)
-				//return
+				return
 			}
 			e.Value = uv
 
