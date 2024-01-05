@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 )
 
 type EventType byte
@@ -17,10 +18,10 @@ const (
 
 // Event - описывает конкретное событие
 type Event struct {
-	Sequence  uint64    // Уникальный порядковый номер записи
-	EventType EventType //Выполненое действие
-	Key       string    // Ключ, затронутый транзакцией
-	Value     string    // Значение для транзакции PUT
+	Sequence  	uint64    // Уникальный порядковый номер записи
+	EventType 	EventType //Выполненое действие
+	Key       	string    // Ключ, затронутый транзакцией
+	Value     	string    // Значение для транзакции PUT
 }
 
 // TransactionLogger - методы для добавления в журнал транзакций
@@ -31,6 +32,8 @@ type TransactionLogger interface {
 
 	ReadEvents() (<-chan Event, <-chan error)
 	Run()
+
+	Close() 	error
 }
 
 // Реализуем интерфейс
@@ -40,13 +43,16 @@ type FileTransactionLogger struct {
 	errors       <-chan error // Калан только для чтения; для приема ошибок
 	lastSequence uint64       // Последний используемый порядковый номер
 	file         *os.File     // Местоположение файла журнала
+	wg 			 *sync.WaitGroup
 }
 
 func (l *FileTransactionLogger) WritePut(key, value string) {
+	l.wg.Add(1)
 	l.events <- Event{EventType: EventPut, Key: key, Value: value}
 }
 
 func (l *FileTransactionLogger) WriteDelete(key string) {
+	l.wg.Add(1)
 	l.events <- Event{EventType: EventDelete, Key: key}
 }
 
@@ -56,18 +62,21 @@ func (l *FileTransactionLogger) Err() <-chan error {
 
 // NewFileTransactionLogger создает экземпляр TransactionLogger
 // возвращаем интерфейс, т.к. в данном случае возможена  фабрика
-func NewFileTransactionLogger(filename string) (TransactionLogger, error) {
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0755)
+func NewFileTransactionLogger(filename string) (*FileTransactionLogger, error) {
+	var err error
+	var l FileTransactionLogger = FileTransactionLogger{wg: &sync.WaitGroup{}}
+
+	l.file, err = os.OpenFile(filename, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open transaction file: %w", err)
 	}
-	return &FileTransactionLogger{file: file}, nil
+	return &l, nil
 }
 
 // Run добавляет записи в конец журнала
 func (l *FileTransactionLogger) Run() {
-	// Создаем буфиризированный канал для контурентной записис в файл транзакций
-	// Буферизированный канал позволит службе потребителю обработать короткие всплески событий без замедления из за дискового io
+	// Создаем буфиризированный канал для конкурентной записи в файл транзакций
+	// Буферизированный канал позволит службе потребителю обработать короткие всплески событий без замедления из-за дискового io
 	// Если буфер заполнится, то методы записи будут блокироватся до момента, когда горутина записи освободит в нем место
 	events := make(chan Event, 16)
 	l.events = events
@@ -91,9 +100,24 @@ func (l *FileTransactionLogger) Run() {
 				errors <- err
 				return
 			}
+			l.wg.Done()
 		}
 	}()
 }
+
+// Close TODO: вероятно нужно вызывать при graceful shutdown
+func (l *FileTransactionLogger) Close() error {
+	// Дожидаемся завершения всех горутин
+	l.wg.Wait()
+
+	// Если канал инициирован
+	if l.events != nil {
+		close(l.events) // Terminates Run loop and goroutine
+	}
+	// Закрываем файл
+	return l.file.Close()
+}
+
 
 // ReadEvents прочитать события из файла
 func (l *FileTransactionLogger) ReadEvents() (<-chan Event, <-chan error) {
@@ -143,3 +167,4 @@ func (l *FileTransactionLogger) ReadEvents() (<-chan Event, <-chan error) {
 
 	return outEvent, outError
 }
+
